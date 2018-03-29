@@ -31,6 +31,9 @@ ErrorHandler::register($log); // catch exceptions by Monolog and log them
 
 function getNewIp(&$ips, $msisdn) {
     global $log;
+    if ($ips[$msisdn]) {
+        return $ips[$msisdn]; // IP already assigned
+    }
     // najit prvni volnou IP
     $firstIp = '10.253.36.10'; // 10.253.36.0/22
     $lastIp = '10.253.39.254';
@@ -145,26 +148,30 @@ if (!$lastTimestamp || $timestamp > $lastTimestamp) {
                 $sheetRec['msisdn']
             );
             if ($affectedRows > 0) {
-                // update (set) IP if not already set (never ever replace IP by another IP!)
                 $statsUpdate++;
-                $ip = getNewIp($ips, $sheetRec['msisdn']);
-                $database->query('UPDATE mod_db SET ip = ?, tmpid = ?, uid = ? WHERE msisdn = ? AND ip IS NULL',
-                    $ip,
-                    ip2long($ip),
-                    $sheetRec['uid'],
-                    $sheetRec['msisdn']
-                );
+                if ($sheetRec['fup']) {
+                    // when FUP flag is active, update (set) IP if not already set (never ever replace IP by another IP!)
+                    $ip = getNewIp($ips, $sheetRec['msisdn']);
+                    $database->query('UPDATE mod_db SET ip = ?, tmpid = ?, uid = ? WHERE msisdn = ? AND ip IS NULL',
+                        $ip,
+                        ip2long($ip),
+                        $sheetRec['uid'],
+                        $sheetRec['msisdn']
+                    );
+                }
             } else {
-                // MSISDN is not present in the database -> insert
-                $statsInsert++;
-                $ip = getNewIp($ips, $sheetRec['msisdn']);
-                $database->query('INSERT INTO mob_db', [
-                    'uid' => $sheetRec['uid'],
-                    'msisdn' => $sheetRec['msisdn'],
-                    'fup' => $sheetRec['fup'],
-                    'ip' => $ip,
-                    'tmpid' => ip2long($ip)
-                ]);
+                if ($sheetRec['fup']) {
+                    // MSISDN is not present in the database -> insert when FUP flag is active
+                    $statsInsert++;
+                    $ip = getNewIp($ips, $sheetRec['msisdn']);
+                    $database->query('INSERT INTO mob_db', [
+                        'uid' => $sheetRec['uid'],
+                        'msisdn' => $sheetRec['msisdn'],
+                        'fup' => $sheetRec['fup'],
+                        'ip' => $ip,
+                        'tmpid' => ip2long($ip)
+                    ]);
+                }
             }
         }
 
