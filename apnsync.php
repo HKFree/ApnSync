@@ -124,6 +124,7 @@ if (!$lastTimestamp || $timestamp > $lastTimestamp) {
         ];
         $database = new Dibi\Connection($options);
 
+        $database->query('SET autocommit=0');
         $database->query('LOCK TABLES mob_db WRITE');
 
         $statsUpdate = 0;
@@ -185,6 +186,7 @@ if (!$lastTimestamp || $timestamp > $lastTimestamp) {
             }
         }
 
+        $database->commit();
         $database->query('UNLOCK TABLES');
 
         print "Done, existing=$statsUpdate inserted=$statsInsert deleted=$statsDelete\n";
