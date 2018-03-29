@@ -23,6 +23,8 @@ $timestampFile = '/tmp/mob-last-timestamp';
 $clientEmail = '356855916299-ifck40oapgsvj6ekai0kj12t9vlr2b2s@developer.gserviceaccount.com';
 $privateKey = file_get_contents('private/HKFree mobily-5d8b3e2a026b.p12');
 
+header('Content-Type: text/plain');
+
 $log = new Logger('apnsync');
 $log->pushHandler(new RotatingFileHandler('/var/log/apnsync/apnsync.log', 300, Logger::DEBUG));
 ErrorHandler::register($log); // catch exceptions by Monolog and log them
