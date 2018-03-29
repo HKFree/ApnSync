@@ -12,50 +12,48 @@ require 'private/config.php';
 
 use Google\Spreadsheet\DefaultServiceRequest;
 use Google\Spreadsheet\ServiceRequestFactory;
+use Monolog\Handler\RotatingFileHandler;
+use Monolog\Logger;
 
 
 $sheetId = '1ugrIgECXTwqXbIlqE7pf6CNZb0edUrkIWuzH6EnjK_Y';
 $worksheetId = 'od5';
 $timestampFile = '/tmp/mob-last-timestamp';
-$client_email = '356855916299-ifck40oapgsvj6ekai0kj12t9vlr2b2s@developer.gserviceaccount.com';
-$private_key = file_get_contents('private/HKFree mobily-5d8b3e2a026b.p12');
+$clientEmail = '356855916299-ifck40oapgsvj6ekai0kj12t9vlr2b2s@developer.gserviceaccount.com';
+$privateKey = file_get_contents('private/HKFree mobily-5d8b3e2a026b.p12');
 
-function getIp($ips, $msisdn) {
-    if ($ips[$msisdn]) {
-	// uz ma IP
-	$ip = $ips[$msisdn];
-	print "MSISDN $msisdn already has IP $ip\n";
-	return $ip;
-    } else {
-	// najit prvni volnou IP
-	$firstIp = '10.253.36.10'; // 10.253.36.0/22
-	$lastIp = '10.253.39.254';
-	for ($i = ip2long($firstIp); $i < ip2long($lastIp); $i++) {
-	    $used = false;
-	    foreach ($ips as $msisdn => $ip) {
-		if (ip2long($ip) == $i) {
-		    $used = true;
-		    break;
-		}
-	    }
-	    if (!$used) {
-		$ip = long2ip($i);
-		print "MSISDN $msisdn assigned new IP $ip\n";
-		return $ip;
-	    }
-	}
-	print "MSISDN $msisdn no new IP available!\n";
-	return ''; // zadna volna IP (asi by se stat nemelo, kdyz mame rezervu)
+$log = new Logger('apnsync');
+$log->pushHandler(new RotatingFileHandler('/var/log/apnsync/apnsync.log', 300, Logger::DEBUG));
+
+function getNewIp(&$ips, $msisdn) {
+    global $log;
+    // najit prvni volnou IP
+    $firstIp = '10.253.36.10'; // 10.253.36.0/22
+    $lastIp = '10.253.39.254';
+    for ($i = ip2long($firstIp); $i < ip2long($lastIp); $i++) {
+        $used = false;
+        foreach ($ips as $aMsisdn => $ip) {
+            if (ip2long($ip) == $i) {
+                $used = true;
+                break;
+            }
+        }
+        if (!$used) {
+            $ip = long2ip($i);
+            $ips[$msisdn] = $ip;
+            $log->debug("MSISDN $msisdn assigned new IP $ip");
+            return $ip;
+        }
     }
+    $log->error("MSISDN $msisdn no new IP available!");
+    return ''; // zadna volna IP (asi by se stat nemelo, kdyz mame rezervu)
 }
 
+$log->info('ApnSync started');
+echo "Updating APN configuration\n";
+
 $scopes = array('https://spreadsheets.google.com/feeds');
-$credentials = new Google_Auth_AssertionCredentials(
-            $client_email,
-            $scopes,
-            $private_key,
-            $privateKeyPassword,
-            'http://oauth.net/grant_type/jwt/1.0/bearer' // Default grant type
+$credentials = new Google_Auth_AssertionCredentials($clientEmail, $scopes, $privateKey, $privateKeyPassword, 'http://oauth.net/grant_type/jwt/1.0/bearer' // Default grant type
 );
 
 $client = new Google_Client();
@@ -79,86 +77,113 @@ $spreadsheet = $spreadsheetService->getSpreadsheetById($sheetId);
 // test timestamp update
 $lastTimestamp = file_get_contents($timestampFile);
 $timestamp = $spreadsheet->getUpdated()->getTimestamp();
-print "Timestamps:\n$lastTimestamp\n$timestamp\n";
-if ($timestamp > $lastTimestamp || $lastTimestamp == '') {
+$log->debug("Timestamps: $lastTimestamp $timestamp");
+if (!$lastTimestamp || $timestamp > $lastTimestamp) {
     file_put_contents($timestampFile, $timestamp);
 
-    $output = array();
+    $sheetRows = array();
 
     $worksheetFeed = $spreadsheet->getWorksheets();
 
     foreach ($worksheetFeed as $worksheet) {
-	if ($worksheet->getId() == "https://spreadsheets.google.com/feeds/worksheets/$sheetId/private/values/$worksheetId") {
-    	    foreach ($worksheet->getListFeed()->getEntries() as $entry) {
-    		$values = $entry->getValues();
-    		$rec = array();
-		$rec['msisdn'] = trim($values['msisdn']);
-		$rec['uid'] = trim($values['uid']);
-		$rec['kauce'] = trim($values['kauce']);
-		$rec['fup'] = trim($values['fup']);
-		if (preg_match("/^[0-9]{12}$/i",$rec['msisdn']) &&
-		    preg_match("/^[0-9]+$/i",$rec['uid']) &&
-		    preg_match("/^[0-9]*$/i",$rec['kauce'])
-		    ) {
-			array_push($output, $rec);
-		}
-    	    }
-	}
+        if ($worksheet->getId() == "https://spreadsheets.google.com/feeds/worksheets/$sheetId/private/values/$worksheetId") {
+            foreach ($worksheet->getListFeed()->getEntries() as $entry) {
+                $values = $entry->getValues();
+                $sheetRec = array();
+                $sheetRec['msisdn'] = trim($values['msisdn']);
+                $sheetRec['uid'] = trim($values['uid']);
+                $sheetRec['kauce'] = trim($values['kauce']);
+                $sheetRec['fup'] = trim($values['fup']);
+                if (preg_match("/^[0-9]{12}$/i", $sheetRec['msisdn']) && preg_match("/^[0-9]+$/i", $sheetRec['uid']) && preg_match("/^[0-9]*$/i", $sheetRec['kauce'])) {
+                    $sheetRows []= $sheetRec;
+                }
+            }
+        }
     }
 
-    print "Valid records: ".count($output)."\n";
+    echo count($sheetRows) . " valid records fetched from Google Docs\n";
+    $log->debug(count($sheetRows) . ' valid records fetched from Google Docs');
 
-    if (count($output) > 100) { // "heuristic" check (error proof TM :)
-	print "Re-inserting data...\n";
+    if (count($sheetRows) > 100) { // "heuristic" check (error proof TM :)
+        print "Updating database...\n";
+        $log->debug('Updating database');
 
-	$dbh = new PDO("mysql:host=db;dbname=userdb", "userdb-mobilis-w", $mysqlPassword);
-	$dbh->exec("LOCK TABLES mob_db WRITE;");
-	
-	$sthsel = $dbh->prepare("SELECT uid, msisdn, kauce, fup, ip FROM mob_db WHERE ip IS NOT NULL");
-	$sthsel->execute();
-	$result = $sthsel->fetchAll();
-	$ips = array();
-	foreach ($result as $row) {
-	    // msisdn -> ip
-	    $ips[$row[1]] = $row[4];
-	}
-	
-	var_dump($ips);
-	
-	
-	$dbh->exec("DELETE FROM mob_db;");
-	
-	$sth = $dbh->prepare ("INSERT INTO mob_db (uid, msisdn, kauce, fup, ip, tmpid)
-					VALUES (:uid, :msisdn, :kauce, :fup, :ip, :tmpid)");
-	foreach ($output as $rec) {
-	    $sth->bindValue (":uid", $rec['uid'], PDO::PARAM_INT);
-	    $sth->bindValue (":msisdn", $rec['msisdn']);
-	    $sth->bindValue (":kauce", $rec['kauce'], PDO::PARAM_INT);
-	    $sth->bindValue (":fup", $rec['fup']);
-	    if ($rec['fup']) {
-		$ip = getIp($ips, $rec['msisdn']); // prirazeni existujici nebo nove IP
-		$ips[$rec['msisdn']] = $ip; // pokud je IP nove prirazena, musime si ji alokovat i v asoc. poli
-	    } else {
-		$ip = $ips[$rec['msisdn']]; // pokud nema uz FUP (APN), porad muze mit historicky prirazenou IP, uz mu ji nechame
-	    }
-	    $sth->bindValue (":ip", $ip);
-	    if ($ip) {
-		$sth->bindValue (":tmpid", ip2long($ip), PDO::PARAM_INT);
-	    } else {
-		$sth->bindValue(":tmpid", null, PDO::PARAM_INT);
-	    }
-	    $sth->execute ();
-	}
+        $options = [
+            'driver'   => 'mysqli',
+            'host'     => 'localhost',
+            'username' => 'radius',
+            'password' => $mysqlPassword,
+            'database' => 'userdb',
+        ];
+        $database = new Dibi\Connection($options);
 
-	$dbh->exec("UNLOCK TABLES;");
+        $database->query('LOCK TABLES mob_db WRITE');
 
-	print "Done.\n";
-	
-	syslog(LOG_INFO, "Mobily: Sync from Google Docs to userdb - ".count($output)." records re-inserted.");
-	
+        $statsUpdate = 0;
+        $statsInsert = 0;
+        $statsDelete = 0;
+
+        $result = $database->query('SELECT uid, msisdn, kauce, fup, ip FROM mob_db WHERE ip IS NOT NULL');
+        $ips = array();
+        foreach ($result as $row) {
+            // msisdn -> ip
+            $ips[$row->msisdn] = $row->ip;
+        }
+
+        // update FUP flag, UID and IP for records in Google Docs
+        $msisdnsInGoogleDocs = [];
+        foreach ($sheetRows as $sheetRec) {
+            $msisdnsInGoogleDocs []= $sheetRec['msisdn'];
+            // update FUP and UID
+            $affectedRows = $database->query('UPDATE mod_db SET fup = ?, uid = ? WHERE msisdn = ?',
+                $sheetRec['fup'],
+                $sheetRec['uid'],
+                $sheetRec['msisdn']
+            );
+            if ($affectedRows > 0) {
+                // update (set) IP if not already set (never ever replace IP by another IP!)
+                $statsUpdate++;
+                $ip = getNewIp($ips, $sheetRec['msisdn']);
+                $database->query('UPDATE mod_db SET ip = ?, tmpid = ?, uid = ? WHERE msisdn = ? AND ip IS NULL',
+                    $ip,
+                    ip2long($ip),
+                    $sheetRec['uid'],
+                    $sheetRec['msisdn']
+                );
+            } else {
+                // MSISDN is not present in the database -> insert
+                $statsInsert++;
+                $ip = getNewIp($ips, $sheetRec['msisdn']);
+                $database->query('INSERT INTO mob_db', [
+                    'uid' => $sheetRec['uid'],
+                    'msisdn' => $sheetRec['msisdn'],
+                    'fup' => $sheetRec['fup'],
+                    'ip' => $ip,
+                    'tmpid' => ip2long($ip)
+                ]);
+            }
+        }
+
+        // $ips reflects MSISDNs in DB now
+        // update (clear FUP flag) records missing from Google Docs but present in MySQL
+        foreach ($msisdnsInGoogleDocs as $msisdn) {
+            if (!($ips[$msisdn])) {
+                // MSISDN is in DB but not in Google Docs
+                $statsDelete++;
+                $database->query('UPDATE mod_db SET fup = ?, WHERE msisdn = ?', '', $msisdn);
+            }
+        }
+
+        $database->query('UNLOCK TABLES');
+
+        print "Done, existing=$statsUpdate inserted=$statsInsert deleted=$statsDelete\n";
+        $log->debug("Updating database done, existing=$statsUpdate inserted=$statsInsert deleted=$statsDelete");
+
     }
-    
+
 } else {
-    print "No update since last run.\n";
+    $log->info('Sheet not updated since last run');
+    print "Sheet not updated since last run.\n";
 }
 
+$log->info('ApnSync finished');
