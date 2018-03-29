@@ -182,7 +182,7 @@ if (!$lastTimestamp || $timestamp > $lastTimestamp) {
             if (!array_key_exists($msisdn, $ips)) {
                 // MSISDN is in DB but not in Google Docs
                 $statsDelete++;
-                $database->query('UPDATE mob_db SET fup = ?, WHERE msisdn = ?', '', $msisdn);
+                $database->query('UPDATE mob_db SET fup = ? WHERE msisdn = ?', '', $msisdn);
             }
         }
 
