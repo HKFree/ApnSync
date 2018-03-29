@@ -7,6 +7,8 @@ The script runs on the APN server and updates the local MySQL database according
 
 ## Installation
 
+PHP 5.6 or newer is required. `curl` and `mysqli` PHP extensions are required.
+
 ```bash
 git clone https://github.com/HKFree/ApnSync.git
 cd ApnSync
