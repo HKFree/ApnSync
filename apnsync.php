@@ -143,7 +143,7 @@ if (!$lastTimestamp || $timestamp > $lastTimestamp) {
         foreach ($sheetRows as $sheetRec) {
             $msisdnsInGoogleDocs []= $sheetRec['msisdn'];
             // update FUP and UID
-            $affectedRows = $database->query('UPDATE mod_db SET fup = ?, uid = ? WHERE msisdn = ?',
+            $affectedRows = $database->query('UPDATE mob_db SET fup = ?, uid = ? WHERE msisdn = ?',
                 $sheetRec['fup'],
                 $sheetRec['uid'],
                 $sheetRec['msisdn']
@@ -153,7 +153,7 @@ if (!$lastTimestamp || $timestamp > $lastTimestamp) {
                 if ($sheetRec['fup']) {
                     // when FUP flag is active, update (set) IP if not already set (never ever replace IP by another IP!)
                     $ip = getNewIp($ips, $sheetRec['msisdn']);
-                    $database->query('UPDATE mod_db SET ip = ?, tmpid = ?, uid = ? WHERE msisdn = ? AND ip IS NULL',
+                    $database->query('UPDATE mob_db SET ip = ?, tmpid = ?, uid = ? WHERE msisdn = ? AND ip IS NULL',
                         $ip,
                         ip2long($ip),
                         $sheetRec['uid'],
@@ -182,7 +182,7 @@ if (!$lastTimestamp || $timestamp > $lastTimestamp) {
             if (!($ips[$msisdn])) {
                 // MSISDN is in DB but not in Google Docs
                 $statsDelete++;
-                $database->query('UPDATE mod_db SET fup = ?, WHERE msisdn = ?', '', $msisdn);
+                $database->query('UPDATE mob_db SET fup = ?, WHERE msisdn = ?', '', $msisdn);
             }
         }
 
