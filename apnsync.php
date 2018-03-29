@@ -31,7 +31,7 @@ ErrorHandler::register($log); // catch exceptions by Monolog and log them
 
 function getNewIp(&$ips, $msisdn) {
     global $log;
-    if ($ips[$msisdn]) {
+    if (isset($ips[$msisdn]) && $ips[$msisdn] !== '') {
         return $ips[$msisdn]; // IP already assigned
     }
     // najit prvni volnou IP
@@ -142,21 +142,21 @@ if (!$lastTimestamp || $timestamp > $lastTimestamp) {
         $msisdnsInGoogleDocs = [];
         foreach ($sheetRows as $sheetRec) {
             $msisdnsInGoogleDocs []= $sheetRec['msisdn'];
-            // update FUP and UID
-            $affectedRows = $database->query('UPDATE mob_db SET fup = ?, uid = ? WHERE msisdn = ?',
-                $sheetRec['fup'],
-                $sheetRec['uid'],
-                $sheetRec['msisdn']
-            );
-            if ($affectedRows > 0) {
+            if (array_key_exists($sheetRec['msisdn'], $ips)) {
+                // MSISDN already in DB
                 $statsUpdate++;
+                // update FUP and UID
+                $database->query('UPDATE mob_db SET fup = ?, uid = ? WHERE msisdn = ?',
+                    $sheetRec['fup'],
+                    $sheetRec['uid'],
+                    $sheetRec['msisdn']
+                );
                 if ($sheetRec['fup']) {
                     // when FUP flag is active, update (set) IP if not already set (never ever replace IP by another IP!)
                     $ip = getNewIp($ips, $sheetRec['msisdn']);
-                    $database->query('UPDATE mob_db SET ip = ?, tmpid = ?, uid = ? WHERE msisdn = ? AND ip IS NULL',
+                    $database->query('UPDATE mob_db SET ip = ?, tmpid = ? WHERE msisdn = ? AND ip IS NULL',
                         $ip,
                         ip2long($ip),
-                        $sheetRec['uid'],
                         $sheetRec['msisdn']
                     );
                 }
@@ -179,7 +179,7 @@ if (!$lastTimestamp || $timestamp > $lastTimestamp) {
         // $ips reflects MSISDNs in DB now
         // update (clear FUP flag) records missing from Google Docs but present in MySQL
         foreach ($msisdnsInGoogleDocs as $msisdn) {
-            if (!($ips[$msisdn])) {
+            if (!array_key_exists($msisdn, $ips)) {
                 // MSISDN is in DB but not in Google Docs
                 $statsDelete++;
                 $database->query('UPDATE mob_db SET fup = ?, WHERE msisdn = ?', '', $msisdn);
