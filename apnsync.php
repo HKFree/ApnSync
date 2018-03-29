@@ -14,6 +14,7 @@ use Google\Spreadsheet\DefaultServiceRequest;
 use Google\Spreadsheet\ServiceRequestFactory;
 use Monolog\Handler\RotatingFileHandler;
 use Monolog\Logger;
+use Monolog\ErrorHandler;
 
 
 $sheetId = '1ugrIgECXTwqXbIlqE7pf6CNZb0edUrkIWuzH6EnjK_Y';
@@ -24,6 +25,7 @@ $privateKey = file_get_contents('private/HKFree mobily-5d8b3e2a026b.p12');
 
 $log = new Logger('apnsync');
 $log->pushHandler(new RotatingFileHandler('/var/log/apnsync/apnsync.log', 300, Logger::DEBUG));
+ErrorHandler::register($log); // catch exceptions by Monolog and log them
 
 function getNewIp(&$ips, $msisdn) {
     global $log;
