@@ -99,9 +99,8 @@ if (!$lastTimestamp || $timestamp > $lastTimestamp) {
                 $sheetRec = array();
                 $sheetRec['msisdn'] = trim($values['msisdn']);
                 $sheetRec['uid'] = trim($values['uid']);
-                $sheetRec['kauce'] = trim($values['kauce']);
                 $sheetRec['fup'] = trim($values['fup']);
-                if (preg_match("/^[0-9]{12}$/i", $sheetRec['msisdn']) && preg_match("/^[0-9]+$/i", $sheetRec['uid']) && preg_match("/^[0-9]*$/i", $sheetRec['kauce'])) {
+                if (preg_match("/^[0-9]{12}$/i", $sheetRec['msisdn']) && preg_match("/^[0-9]+$/i", $sheetRec['uid'])) {
                     $sheetRows []= $sheetRec;
                 }
             }
@@ -131,7 +130,7 @@ if (!$lastTimestamp || $timestamp > $lastTimestamp) {
         $statsInsert = 0;
         $statsDelete = 0;
 
-        $result = $database->query('SELECT uid, msisdn, kauce, fup, ip FROM mob_db WHERE ip IS NOT NULL');
+        $result = $database->query('SELECT uid, msisdn, fup, ip FROM mob_db');
         $ips = array();
         foreach ($result as $row) {
             // msisdn -> ip
@@ -151,15 +150,6 @@ if (!$lastTimestamp || $timestamp > $lastTimestamp) {
                     $sheetRec['uid'],
                     $sheetRec['msisdn']
                 );
-                if ($sheetRec['fup']) {
-                    // when FUP flag is active, update (set) IP if not already set (never ever replace IP by another IP!)
-                    $ip = getNewIp($ips, $sheetRec['msisdn']);
-                    $database->query('UPDATE mob_db SET ip = ?, tmpid = ? WHERE msisdn = ? AND ip IS NULL',
-                        $ip,
-                        ip2long($ip),
-                        $sheetRec['msisdn']
-                    );
-                }
             } else {
                 if ($sheetRec['fup']) {
                     // MSISDN is not present in the database -> insert when FUP flag is active
