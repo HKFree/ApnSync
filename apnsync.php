@@ -10,18 +10,16 @@ error_reporting(E_ALL);
 require 'vendor/autoload.php';
 require 'private/config.php';
 
-use Google\Spreadsheet\DefaultServiceRequest;
-use Google\Spreadsheet\ServiceRequestFactory;
 use Monolog\Handler\RotatingFileHandler;
 use Monolog\Logger;
 use Monolog\ErrorHandler;
 
 
 $sheetId = '1ugrIgECXTwqXbIlqE7pf6CNZb0edUrkIWuzH6EnjK_Y';
-$worksheetId = 'od5';
+$worksheetGid = 3; // gid=? in URL when the sheet is selected
 $timestampFile = '/tmp/mob-last-timestamp';
-$clientEmail = '356855916299-ifck40oapgsvj6ekai0kj12t9vlr2b2s@developer.gserviceaccount.com';
-$privateKey = file_get_contents('private/HKFree mobily-5d8b3e2a026b.p12');
+putenv('GOOGLE_APPLICATION_CREDENTIALS=private/service-account.json');
+
 
 header('Content-Type: text/plain');
 
@@ -59,47 +57,53 @@ function getNewIp(&$ips, $msisdn) {
 $log->info('ApnSync started');
 echo "Updating APN configuration\n";
 
-$scopes = array('https://spreadsheets.google.com/feeds');
-$credentials = new Google_Auth_AssertionCredentials($clientEmail, $scopes, $privateKey, $privateKeyPassword, 'http://oauth.net/grant_type/jwt/1.0/bearer' // Default grant type
-);
+$client = new Google\Client();
+$client->useApplicationDefaultCredentials();
+$client->setScopes([Google\Service\Sheets::SPREADSHEETS, Google\Service\Drive::DRIVE]);
+$client->setAccessType('offline');
 
-$client = new Google_Client();
-$client->setAssertionCredentials($credentials);
-if ($client->getAuth()->isAccessTokenExpired()) {
-    $client->getAuth()->refreshTokenWithAssertion();
+if ($client->isAccessTokenExpired()) {
+    $client->fetchAccessTokenWithAssertion();
 }
 
-$tokenData = json_decode($client->getAccessToken());
-$accessToken = $tokenData->access_token;
+$spreadsheetService = new Google\Service\Sheets($client);
+$spreadsheet = $spreadsheetService->spreadsheets->get($sheetId);
 
-$serviceRequest = new DefaultServiceRequest($accessToken);
-ServiceRequestFactory::setInstance($serviceRequest);
+$service = new Google\Service\Drive($client);
 
-$spreadsheetService = new Google\Spreadsheet\SpreadsheetService();
-$spreadsheetFeed = $spreadsheetService->getSpreadsheets();
-
-#$spreadsheet = $spreadsheetFeed->getByTitle('Hello World');
-$spreadsheet = $spreadsheetService->getSpreadsheetById($sheetId);
+$sheetFile = $service->files->get($sheetId, array(
+    'fields' => 'id, name, modifiedTime',
+    // uncomment the following if you are working with team drive
+    //'supportsTeamDrives' => true
+));
 
 // test timestamp update
 $lastTimestamp = file_get_contents($timestampFile);
-$timestamp = $spreadsheet->getUpdated()->getTimestamp();
+$timestamp = $sheetFile->getModifiedTime();
+
 $log->debug("Timestamps: $lastTimestamp $timestamp");
 if (!$lastTimestamp || $timestamp > $lastTimestamp) {
     file_put_contents($timestampFile, $timestamp);
 
     $sheetRows = array();
 
-    $worksheetFeed = $spreadsheet->getWorksheets();
+    $worksheetFeed = $spreadsheet->getSheets();
 
     foreach ($worksheetFeed as $worksheet) {
-        if ($worksheet->getId() == "https://spreadsheets.google.com/feeds/worksheets/$sheetId/private/values/$worksheetId") {
-            foreach ($worksheet->getListFeed()->getEntries() as $entry) {
-                $values = $entry->getValues();
+        // var_dump($worksheet->getProperties()->sheetId." ".$worksheet->getProperties()->title);
+        if ($worksheet->getProperties()->sheetId == $worksheetGid) {
+            $log->debug("Sheet found {$worksheet->getProperties()->title}\n");
+            $response = $spreadsheetService->spreadsheets_values->get($sheetId, $worksheet->getProperties()->title);
+            $values = $response->getValues(); // array of arrays
+            $columnNameToIndex = array();
+            foreach ($values[0] as $i => $columnName) { // column names in first row
+                $columnNameToIndex[strtolower($columnName)] = $i;
+            }
+            for ($i = 1; $i < count($values); $i++) { // data in next rows
                 $sheetRec = array();
-                $sheetRec['msisdn'] = trim($values['msisdn']);
-                $sheetRec['uid'] = trim($values['uid']);
-                $sheetRec['fup'] = trim($values['fup']);
+                $sheetRec['msisdn'] = trim($values[$i][$columnNameToIndex['msisdn']]);
+                $sheetRec['uid'] = trim($values[$i][$columnNameToIndex['uid']]);
+                $sheetRec['fup'] = trim($values[$i][$columnNameToIndex['fup']]);
                 if (preg_match("/^[0-9]{12}$/i", $sheetRec['msisdn']) && preg_match("/^[0-9]+$/i", $sheetRec['uid'])) {
                     $sheetRows []= $sheetRec;
                 }
